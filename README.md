@@ -279,11 +279,6 @@ rv3032_init(&rtc_handle, i2c_bus, GPIO_NUM_2, alarm_callback);
 - No dynamic memory allocation during normal operation
 - Stack-based temporary buffers for I2C operations
 
-### Power Management
-- Ultra-low power consumption (160nA typical)
-- Backup battery support
-- Temperature compensation active from -40°C to +85°C
-
 ## Future Extensions
 
 This library is designed for easy extension:
@@ -319,6 +314,7 @@ This library is designed for easy extension:
 - Ensure ESP-IDF version is 5.5 or higher
 - Check CMakeLists.txt includes required components
 - Verify all source files are in SRCS list
+- If building the examples: MAKE SURE THE ROOT DIRECTORY IS NAME "RV3032_ESP32" (or change the CMakeList.txt)
 
 ## License
 
