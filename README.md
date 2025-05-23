@@ -20,6 +20,9 @@ A lightweight, ESP-IDF 5.5 native C library for the **RV-3032-C7** Temperature C
 - Pull-up resistors for I2C (usually built into ESP32 boards)
 - Optional: Pull-up resistor for INT pin (10kΩ recommended)
 
+## Documentation
+
+📖 **[RV-3032-C7 Application Manual](https://www.microcrystal.com/fileadmin/Media/Products/RTC/App.Manual/RV-3032-C7_App-Manual.pdf)** - Official datasheet and technical reference
 
 ## Quick Start
 
