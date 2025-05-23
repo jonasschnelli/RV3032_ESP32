@@ -3,6 +3,7 @@ name: "RV3032"
 description: "ESP-IDF driver for RV-3032-C7 Real-Time Clock"
 url: "https://github.com/jonasschnelli/RV3032_ESP32"
 documentation: "https://github.com/jonasschnelli/RV3032_ESP32/blob/main/README.md"
+license: "MIT"
 
 dependencies:
   idf:
@@ -21,4 +22,3 @@ tags:
   - real-time-clock
   - i2c
   - time
-  

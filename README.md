@@ -319,7 +319,11 @@ This library is designed for easy extension:
 
 ## License
 
-This library is provided as-is for educational and commercial use. Based on the RV-3032-C7 Application Manual Rev. 1.3 (May 2023).
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+Author: Jonas Schnelli
+
+Based on the RV-3032-C7 Application Manual Rev. 1.3 (May 2023).
 
 ## Contributing
 
