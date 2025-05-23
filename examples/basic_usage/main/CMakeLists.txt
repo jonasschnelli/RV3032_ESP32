@@ -1,0 +1,7 @@
+idf_component_register(
+    SRCS "main.cpp"
+    INCLUDE_DIRS "."
+    REQUIRES RV3032_ESP32
+)
+
+# MAKE SURE ROOT DIRECTORY IS CALLED RV3032_ESP32
