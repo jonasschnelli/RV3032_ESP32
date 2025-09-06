@@ -22,7 +22,7 @@ extern "C" {
 #include <stdint.h>
 #include <stdbool.h>
 #include "esp_err.h"
-#include "driver/i2c_master.h"
+#include "driver/i2c.h"
 #include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -59,8 +59,9 @@ extern "C" {
 // Control 2 Register Bits
 #define RV3032_CTRL2_AIE         0x08   // Alarm Interrupt Enable (bit 3)
 
-// Default I2C timeout
-#define RV3032_I2C_TIMEOUT_MS    1000
+// I2C Configuration
+#define RV3032_I2C_MASTER_NUM     I2C_NUM_0
+#define RV3032_I2C_MASTER_TIMEOUT_MS 1000
 
 /**
  * @brief Structure to hold time/date information
@@ -92,22 +93,21 @@ typedef struct {
  * @brief RV3032 configuration structure
  */
 typedef struct {
-    i2c_master_bus_handle_t i2c_bus_handle;    // I2C bus handle
-    i2c_master_dev_handle_t i2c_dev_handle;    // I2C device handle
+    i2c_port_t i2c_port;                      // I2C port number
     gpio_num_t int_pin;                        // Interrupt pin (GPIO_NUM_NC if not used)
     void (*alarm_callback)(void);              // Alarm callback function
+    bool initialized;                          // Initialization status
 } rv3032_handle_t;
 
 /**
  * @brief Initialize the RV3032 RTC
  * @param handle Pointer to RV3032 handle structure
- * @param i2c_bus_handle I2C master bus handle
  * @param int_pin GPIO pin for interrupt (GPIO_NUM_NC if not used)
  * @param alarm_callback Callback function for alarm interrupt (NULL if not used)
  * @return ESP_OK on success, error code otherwise
+ * @note Assumes I2C is already initialized by the main application
  */
 esp_err_t rv3032_init(rv3032_handle_t* handle, 
-                      i2c_master_bus_handle_t i2c_bus_handle,
                       gpio_num_t int_pin,
                       void (*alarm_callback)(void));
 

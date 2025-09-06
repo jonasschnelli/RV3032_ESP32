@@ -30,7 +30,6 @@ static void IRAM_ATTR gpio_isr_handler(void* arg);
 // === Public Functions ===
 
 esp_err_t rv3032_init(rv3032_handle_t* handle, 
-                      i2c_master_bus_handle_t i2c_bus_handle,
                       gpio_num_t int_pin,
                       void (*alarm_callback)(void)) {
     if (!handle) {
@@ -38,29 +37,20 @@ esp_err_t rv3032_init(rv3032_handle_t* handle,
     }
 
     memset(handle, 0, sizeof(rv3032_handle_t));
-    handle->i2c_bus_handle = i2c_bus_handle;
+    handle->i2c_port = RV3032_I2C_MASTER_NUM;
     handle->int_pin = int_pin;
     handle->alarm_callback = alarm_callback;
 
-    // Configure I2C device
-    i2c_device_config_t dev_cfg = {
-        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
-        .device_address = RV3032_I2C_ADDR,
-        .scl_speed_hz = 400000,  // 400kHz
-    };
+    // ASSUMES I2C is already initialized in the main application
 
-    esp_err_t ret = i2c_master_bus_add_device(i2c_bus_handle, &dev_cfg, &handle->i2c_dev_handle);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to add I2C device: %s", esp_err_to_name(ret));
-        return ret;
-    }
-
+    // Give the chip time to start up
+    vTaskDelay(pdMS_TO_TICKS(100));
+    
     // Test communication
     bool connected;
-    ret = rv3032_is_connected(handle, &connected);
+    esp_err_t ret = rv3032_is_connected(handle, &connected);
     if (ret != ESP_OK || !connected) {
         ESP_LOGE(TAG, "RV3032 not responding");
-        i2c_master_bus_rm_device(handle->i2c_dev_handle);
         return ESP_ERR_NOT_FOUND;
     }
 
@@ -77,25 +67,23 @@ esp_err_t rv3032_init(rv3032_handle_t* handle,
         ret = gpio_config(&io_conf);
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "GPIO config failed: %s", esp_err_to_name(ret));
-            i2c_master_bus_rm_device(handle->i2c_dev_handle);
             return ret;
         }
 
         ret = gpio_install_isr_service(0);
         if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) {
             ESP_LOGE(TAG, "GPIO ISR service install failed: %s", esp_err_to_name(ret));
-            i2c_master_bus_rm_device(handle->i2c_dev_handle);
             return ret;
         }
 
         ret = gpio_isr_handler_add(int_pin, gpio_isr_handler, handle);
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "GPIO ISR handler add failed: %s", esp_err_to_name(ret));
-            i2c_master_bus_rm_device(handle->i2c_dev_handle);
             return ret;
         }
     }
 
+    handle->initialized = true;
     ESP_LOGI(TAG, "RV3032 initialized successfully");
     return ESP_OK;
 }
@@ -110,11 +98,7 @@ esp_err_t rv3032_deinit(rv3032_handle_t* handle) {
         gpio_isr_handler_remove(handle->int_pin);
     }
 
-    // Remove I2C device
-    if (handle->i2c_dev_handle) {
-        i2c_master_bus_rm_device(handle->i2c_dev_handle);
-    }
-
+    handle->initialized = false;
     memset(handle, 0, sizeof(rv3032_handle_t));
     return ESP_OK;
 }
@@ -316,8 +300,14 @@ esp_err_t rv3032_is_connected(rv3032_handle_t* handle, bool* connected) {
         return ESP_ERR_INVALID_ARG;
     }
 
-    uint8_t dummy;
-    esp_err_t ret = rv3032_read_register(handle, RV3032_REG_SECONDS, &dummy);
+    i2c_cmd_handle_t cmd = i2c_cmd_link_create();
+    i2c_master_start(cmd);
+    i2c_master_write_byte(cmd, (RV3032_I2C_ADDR << 1) | I2C_MASTER_WRITE, true);
+    i2c_master_stop(cmd);
+    
+    esp_err_t ret = i2c_master_cmd_begin(handle->i2c_port, cmd, pdMS_TO_TICKS(RV3032_I2C_MASTER_TIMEOUT_MS));
+    i2c_cmd_link_delete(cmd);
+    
     *connected = (ret == ESP_OK);
     return ESP_OK;
 }
@@ -334,15 +324,61 @@ static uint8_t dec_to_bcd(uint8_t dec) {
 
 static esp_err_t rv3032_write_register(rv3032_handle_t* handle, uint8_t reg, uint8_t value) {
     uint8_t write_buf[2] = {reg, value};
-    return i2c_master_transmit(handle->i2c_dev_handle, write_buf, 2, RV3032_I2C_TIMEOUT_MS);
+    
+    i2c_cmd_handle_t cmd = i2c_cmd_link_create();
+    i2c_master_start(cmd);
+    i2c_master_write_byte(cmd, (RV3032_I2C_ADDR << 1) | I2C_MASTER_WRITE, true);
+    i2c_master_write(cmd, write_buf, 2, true);
+    i2c_master_stop(cmd);
+    
+    esp_err_t ret = i2c_master_cmd_begin(handle->i2c_port, cmd, pdMS_TO_TICKS(RV3032_I2C_MASTER_TIMEOUT_MS));
+    i2c_cmd_link_delete(cmd);
+    
+    return ret;
 }
 
 static esp_err_t rv3032_read_register(rv3032_handle_t* handle, uint8_t reg, uint8_t* value) {
-    return i2c_master_transmit_receive(handle->i2c_dev_handle, &reg, 1, value, 1, RV3032_I2C_TIMEOUT_MS);
+    i2c_cmd_handle_t cmd = i2c_cmd_link_create();
+    
+    // Write register address
+    i2c_master_start(cmd);
+    i2c_master_write_byte(cmd, (RV3032_I2C_ADDR << 1) | I2C_MASTER_WRITE, true);
+    i2c_master_write_byte(cmd, reg, true);
+    
+    // Read data
+    i2c_master_start(cmd);
+    i2c_master_write_byte(cmd, (RV3032_I2C_ADDR << 1) | I2C_MASTER_READ, true);
+    i2c_master_read_byte(cmd, value, I2C_MASTER_NACK);
+    i2c_master_stop(cmd);
+    
+    esp_err_t ret = i2c_master_cmd_begin(handle->i2c_port, cmd, pdMS_TO_TICKS(RV3032_I2C_MASTER_TIMEOUT_MS));
+    i2c_cmd_link_delete(cmd);
+    
+    return ret;
 }
 
 static esp_err_t rv3032_read_registers(rv3032_handle_t* handle, uint8_t reg, uint8_t* buffer, uint8_t length) {
-    return i2c_master_transmit_receive(handle->i2c_dev_handle, &reg, 1, buffer, length, RV3032_I2C_TIMEOUT_MS);
+    i2c_cmd_handle_t cmd = i2c_cmd_link_create();
+    
+    // Write register address
+    i2c_master_start(cmd);
+    i2c_master_write_byte(cmd, (RV3032_I2C_ADDR << 1) | I2C_MASTER_WRITE, true);
+    i2c_master_write_byte(cmd, reg, true);
+    
+    // Read data
+    i2c_master_start(cmd);
+    i2c_master_write_byte(cmd, (RV3032_I2C_ADDR << 1) | I2C_MASTER_READ, true);
+    
+    if (length > 1) {
+        i2c_master_read(cmd, buffer, length - 1, I2C_MASTER_ACK);
+    }
+    i2c_master_read_byte(cmd, buffer + length - 1, I2C_MASTER_NACK);
+    i2c_master_stop(cmd);
+    
+    esp_err_t ret = i2c_master_cmd_begin(handle->i2c_port, cmd, pdMS_TO_TICKS(RV3032_I2C_MASTER_TIMEOUT_MS));
+    i2c_cmd_link_delete(cmd);
+    
+    return ret;
 }
 
 static esp_err_t rv3032_write_registers(rv3032_handle_t* handle, uint8_t reg, const uint8_t* buffer, uint8_t length) {
@@ -354,7 +390,14 @@ static esp_err_t rv3032_write_registers(rv3032_handle_t* handle, uint8_t reg, co
     write_buf[0] = reg;
     memcpy(&write_buf[1], buffer, length);
     
-    esp_err_t ret = i2c_master_transmit(handle->i2c_dev_handle, write_buf, length + 1, RV3032_I2C_TIMEOUT_MS);
+    i2c_cmd_handle_t cmd = i2c_cmd_link_create();
+    i2c_master_start(cmd);
+    i2c_master_write_byte(cmd, (RV3032_I2C_ADDR << 1) | I2C_MASTER_WRITE, true);
+    i2c_master_write(cmd, write_buf, length + 1, true);
+    i2c_master_stop(cmd);
+    
+    esp_err_t ret = i2c_master_cmd_begin(handle->i2c_port, cmd, pdMS_TO_TICKS(RV3032_I2C_MASTER_TIMEOUT_MS));
+    i2c_cmd_link_delete(cmd);
     free(write_buf);
     return ret;
 }
